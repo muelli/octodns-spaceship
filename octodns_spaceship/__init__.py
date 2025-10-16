@@ -220,22 +220,24 @@ class SpaceshipProvider(BaseProvider):
                     'address': value,
                 })
         elif record._type == 'CNAME':
-            # Keep the value as-is, including trailing dot if present
-            self.log.debug(f'_record_to_spaceship_format: CNAME value={record.value!r}')
+            # Spaceship API does NOT accept trailing dots - strip them
+            cname_value = record.value.rstrip('.')
+            self.log.debug(f'_record_to_spaceship_format: CNAME value={record.value!r} -> {cname_value!r}')
             items.append({
                 'type': 'CNAME',
                 'name': name,
-                'cname': record.value,
+                'cname': cname_value,
             })
         elif record._type == 'MX':
             for value in record.values:
-                # Keep the value as-is, including trailing dot if present
-                self.log.debug(f'_record_to_spaceship_format: MX exchange={value.exchange!r}')
+                # Spaceship API does NOT accept trailing dots - strip them
+                exchange = value.exchange.rstrip('.')
+                self.log.debug(f'_record_to_spaceship_format: MX exchange={value.exchange!r} -> {exchange!r}')
                 items.append({
                     'type': 'MX',
                     'name': name,
                     'preference': value.preference,
-                    'exchange': value.exchange,
+                    'exchange': exchange,
                 })
         elif record._type == 'TXT':
             for value in record.values:
@@ -246,24 +248,26 @@ class SpaceshipProvider(BaseProvider):
                 })
         elif record._type == 'NS':
             for value in record.values:
-                # Keep the value as-is, including trailing dot if present
-                self.log.debug(f'_record_to_spaceship_format: NS nameserver={value!r}')
+                # Spaceship API does NOT accept trailing dots - strip them
+                nameserver = value.rstrip('.')
+                self.log.debug(f'_record_to_spaceship_format: NS nameserver={value!r} -> {nameserver!r}')
                 items.append({
                     'type': 'NS',
                     'name': name,
-                    'nameserver': value,
+                    'nameserver': nameserver,
                 })
         elif record._type == 'SRV':
             for value in record.values:
-                # Keep the value as-is, including trailing dot if present
-                self.log.debug(f'_record_to_spaceship_format: SRV target={value.target!r}')
+                # Spaceship API does NOT accept trailing dots - strip them
+                target = value.target.rstrip('.')
+                self.log.debug(f'_record_to_spaceship_format: SRV target={value.target!r} -> {target!r}')
                 items.append({
                     'type': 'SRV',
                     'name': name,
                     'priority': value.priority,
                     'weight': value.weight,
                     'port': value.port,
-                    'target': value.target,
+                    'target': target,
                 })
         elif record._type == 'CAA':
             for value in record.values:
