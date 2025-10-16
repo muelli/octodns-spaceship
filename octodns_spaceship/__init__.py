@@ -283,20 +283,29 @@ class SpaceshipProvider(BaseProvider):
         to_delete = []
         
         for change in changes:
-            if hasattr(change, 'existing') and hasattr(change, 'new'):
+            # Check what type of change this is
+            has_existing = hasattr(change, 'existing') and change.existing is not None
+            has_new = hasattr(change, 'new') and change.new is not None
+            
+            if has_existing and has_new:
                 # Update: delete old, create new
+                self.log.debug('_apply: update %s', change)
                 existing_items = self._record_to_spaceship_format(change.existing)
                 new_items = self._record_to_spaceship_format(change.new)
                 to_delete.extend(existing_items)
                 to_create.extend(new_items)
-            elif hasattr(change, 'existing'):
+            elif has_existing:
                 # Delete
+                self.log.debug('_apply: delete %s', change)
                 items = self._record_to_spaceship_format(change.existing)
                 to_delete.extend(items)
-            elif hasattr(change, 'new'):
+            elif has_new:
                 # Create
+                self.log.debug('_apply: create %s', change)
                 items = self._record_to_spaceship_format(change.new)
                 to_create.extend(items)
+            else:
+                self.log.warning('_apply: skipping change with no existing or new record: %s', change)
         
         # Apply deletions
         if to_delete:
@@ -313,9 +322,16 @@ class SpaceshipProvider(BaseProvider):
         url = f"{self.base_url}/{domain}"
         
         self.log.info(f'_delete_records: deleting {len(items)} records from {domain}')
-        response = requests.delete(url, json=items, headers=self._get_headers())
-        response.raise_for_status()
+        self.log.debug(f'_delete_records: items={items}')
         
+        response = requests.delete(url, json=items, headers=self._get_headers())
+        
+        if not response.ok:
+            self.log.error(f'_delete_records: failed with status {response.status_code}')
+            self.log.error(f'_delete_records: response body={response.text}')
+            self.log.error(f'_delete_records: items sent={items}')
+        
+        response.raise_for_status()
         self.log.debug(f'_delete_records: response={response.text}')
     
     def _create_records(self, domain, items):
@@ -328,7 +344,14 @@ class SpaceshipProvider(BaseProvider):
         }
         
         self.log.info(f'_create_records: creating {len(items)} records for {domain}')
-        response = requests.put(url, json=payload, headers=self._get_headers())
-        response.raise_for_status()
+        self.log.debug(f'_create_records: payload={payload}')
         
+        response = requests.put(url, json=payload, headers=self._get_headers())
+        
+        if not response.ok:
+            self.log.error(f'_create_records: failed with status {response.status_code}')
+            self.log.error(f'_create_records: response body={response.text}')
+            self.log.error(f'_create_records: payload sent={payload}')
+        
+        response.raise_for_status()
         self.log.debug(f'_create_records: response={response.text}')
