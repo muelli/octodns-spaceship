@@ -333,15 +333,33 @@ class SpaceshipProvider(BaseProvider):
         self.log.info(f'_delete_records: deleting {len(items)} records from {domain}')
         self.log.debug(f'_delete_records: items={items}')
         
-        response = requests.delete(url, json=items, headers=self._get_headers())
-        
-        if not response.ok:
-            self.log.error(f'_delete_records: failed with status {response.status_code}')
-            self.log.error(f'_delete_records: response body={response.text}')
-            self.log.error(f'_delete_records: items sent={items}')
-        
-        response.raise_for_status()
-        self.log.debug(f'_delete_records: response={response.text}')
+        # Try to delete records one by one to identify problematic ones
+        if len(items) > 1:
+            self.log.info(f'_delete_records: attempting individual deletes to isolate errors')
+            failed_items = []
+            for item in items:
+                try:
+                    response = requests.delete(url, json=[item], headers=self._get_headers())
+                    response.raise_for_status()
+                    self.log.debug(f'_delete_records: successfully deleted {item}')
+                except requests.exceptions.HTTPError as e:
+                    self.log.error(f'_delete_records: failed to delete item: {item}')
+                    self.log.error(f'_delete_records: error response: {e.response.text}')
+                    failed_items.append(item)
+            
+            if failed_items:
+                self.log.error(f'_delete_records: {len(failed_items)} items failed to delete')
+                raise Exception(f'Failed to delete {len(failed_items)} records: {failed_items}')
+        else:
+            response = requests.delete(url, json=items, headers=self._get_headers())
+            
+            if not response.ok:
+                self.log.error(f'_delete_records: failed with status {response.status_code}')
+                self.log.error(f'_delete_records: response body={response.text}')
+                self.log.error(f'_delete_records: items sent={items}')
+            
+            response.raise_for_status()
+            self.log.debug(f'_delete_records: response={response.text}')
     
     def _create_records(self, domain, items):
         """Create records in Spaceship DNS"""
@@ -361,6 +379,19 @@ class SpaceshipProvider(BaseProvider):
             self.log.error(f'_create_records: failed with status {response.status_code}')
             self.log.error(f'_create_records: response body={response.text}')
             self.log.error(f'_create_records: payload sent={payload}')
+            
+            # Try to identify which specific item is causing the issue
+            if len(items) > 1:
+                self.log.info(f'_create_records: attempting individual creates to isolate errors')
+                for item in items:
+                    try:
+                        test_payload = {"force": False, "items": [item]}
+                        test_response = requests.put(url, json=test_payload, headers=self._get_headers())
+                        test_response.raise_for_status()
+                        self.log.debug(f'_create_records: item OK: {item}')
+                    except requests.exceptions.HTTPError as e:
+                        self.log.error(f'_create_records: PROBLEMATIC ITEM: {item}')
+                        self.log.error(f'_create_records: error: {e.response.text}')
         
         response.raise_for_status()
         self.log.debug(f'_create_records: response={response.text}')
