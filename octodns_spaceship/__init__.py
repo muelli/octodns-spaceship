@@ -220,7 +220,15 @@ class SpaceshipProvider(BaseProvider):
         """Convert OctoDNS record to Spaceship API format"""
         items = []
         name = record.name if record.name else '@'
+        
+        # Spaceship API only accepts TTL values between 60 and 3600
         ttl = record.ttl
+        if ttl < 60:
+            self.log.warning(f'_record_to_spaceship_format: TTL {ttl} is below minimum 60, clamping to 60')
+            ttl = 60
+        elif ttl > 3600:
+            self.log.warning(f'_record_to_spaceship_format: TTL {ttl} is above maximum 3600, clamping to 3600')
+            ttl = 3600
         
         if record._type == 'A':
             for value in record.values:
