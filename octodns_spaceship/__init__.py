@@ -260,103 +260,123 @@ class SpaceshipProvider(BaseProvider):
         self.log.info('populate: found %d records', len(zone.records) - before)
         return True
     
+    def _format_a_record(self, name, value, ttl):
+        """Format A record for Spaceship API"""
+        return {
+            'type': 'A',
+            'name': name,
+            'address': value,
+            'ttl': ttl,
+        }
+    
+    def _format_aaaa_record(self, name, value, ttl):
+        """Format AAAA record for Spaceship API"""
+        return {
+            'type': 'AAAA',
+            'name': name,
+            'address': value,
+            'ttl': ttl,
+        }
+    
+    def _format_cname_record(self, name, value, ttl):
+        """Format CNAME record for Spaceship API"""
+        cname_value = self._normalize_fqdn_to_spaceship(value)
+        self.log.debug(f'CNAME: {value!r} -> {cname_value!r}')
+        return {
+            'type': 'CNAME',
+            'name': name,
+            'cname': cname_value,
+            'ttl': ttl,
+        }
+    
+    def _format_mx_record(self, name, value, ttl):
+        """Format MX record for Spaceship API"""
+        exchange = self._normalize_fqdn_to_spaceship(value.exchange)
+        self.log.debug(f'MX: {value.exchange!r} -> {exchange!r}')
+        return {
+            'type': 'MX',
+            'name': name,
+            'preference': value.preference,
+            'exchange': exchange,
+            'ttl': ttl,
+        }
+    
+    def _format_txt_record(self, name, value, ttl):
+        """Format TXT record for Spaceship API"""
+        return {
+            'type': 'TXT',
+            'name': name,
+            'value': value,
+            'ttl': ttl,
+        }
+    
+    def _format_ns_record(self, name, value, ttl):
+        """Format NS record for Spaceship API"""
+        nameserver = self._normalize_fqdn_to_spaceship(value)
+        self.log.debug(f'NS: {value!r} -> {nameserver!r}')
+        return {
+            'type': 'NS',
+            'name': name,
+            'nameserver': nameserver,
+            'ttl': ttl,
+        }
+    
+    def _format_srv_record(self, name, value, ttl):
+        """Format SRV record for Spaceship API"""
+        target = self._normalize_fqdn_to_spaceship(value.target)
+        self.log.debug(f'SRV: {value.target!r} -> {target!r}')
+        return {
+            'type': 'SRV',
+            'name': name,
+            'priority': value.priority,
+            'weight': value.weight,
+            'port': value.port,
+            'target': target,
+            'ttl': ttl,
+        }
+    
+    def _format_caa_record(self, name, value, ttl):
+        """Format CAA record for Spaceship API"""
+        return {
+            'type': 'CAA',
+            'name': name,
+            'flat': value.flags,
+            'tag': value.tag,
+            'value': value.value,
+            'ttl': ttl,
+        }
+    
     def _record_to_spaceship_format(self, record):
         """Convert OctoDNS record to Spaceship API format"""
         items = []
         name = record.name if record.name else '@'
+        ttl = self._clamp_ttl(record.ttl)
         
-        # Spaceship API only accepts TTL values between 60 and 3600
-        ttl = record.ttl
-        if ttl < 60:
-            self.log.warning(f'_record_to_spaceship_format: TTL {ttl} is below minimum 60, clamping to 60')
-            ttl = 60
-        elif ttl > 3600:
-            self.log.warning(f'_record_to_spaceship_format: TTL {ttl} is above maximum 3600, clamping to 3600')
-            ttl = 3600
+        # Map record types to their formatter functions
+        formatters = {
+            'A': self._format_a_record,
+            'AAAA': self._format_aaaa_record,
+            'CNAME': self._format_cname_record,
+            'MX': self._format_mx_record,
+            'TXT': self._format_txt_record,
+            'NS': self._format_ns_record,
+            'SRV': self._format_srv_record,
+            'CAA': self._format_caa_record,
+        }
         
-        if record._type == 'A':
-            for value in record.values:
-                items.append({
-                    'type': 'A',
-                    'name': name,
-                    'address': value,
-                    'ttl': ttl,
-                })
-        elif record._type == 'AAAA':
-            for value in record.values:
-                items.append({
-                    'type': 'AAAA',
-                    'name': name,
-                    'address': value,
-                    'ttl': ttl,
-                })
-        elif record._type == 'CNAME':
-            # Spaceship API does NOT accept trailing dots - strip them
-            cname_value = record.value.rstrip('.')
-            self.log.debug(f'_record_to_spaceship_format: CNAME value={record.value!r} -> {cname_value!r}')
-            items.append({
-                'type': 'CNAME',
-                'name': name,
-                'cname': cname_value,
-                'ttl': ttl,
-            })
-        elif record._type == 'MX':
-            for value in record.values:
-                # Spaceship API does NOT accept trailing dots - strip them
-                exchange = value.exchange.rstrip('.')
-                self.log.debug(f'_record_to_spaceship_format: MX exchange={value.exchange!r} -> {exchange!r}')
-                items.append({
-                    'type': 'MX',
-                    'name': name,
-                    'preference': value.preference,
-                    'exchange': exchange,
-                    'ttl': ttl,
-                })
-        elif record._type == 'TXT':
-            for value in record.values:
-                items.append({
-                    'type': 'TXT',
-                    'name': name,
-                    'value': value,
-                    'ttl': ttl,
-                })
-        elif record._type == 'NS':
-            for value in record.values:
-                # Spaceship API does NOT accept trailing dots - strip them
-                nameserver = value.rstrip('.')
-                self.log.debug(f'_record_to_spaceship_format: NS nameserver={value!r} -> {nameserver!r}')
-                items.append({
-                    'type': 'NS',
-                    'name': name,
-                    'nameserver': nameserver,
-                    'ttl': ttl,
-                })
-        elif record._type == 'SRV':
-            for value in record.values:
-                # Spaceship API does NOT accept trailing dots - strip them
-                target = value.target.rstrip('.')
-                self.log.debug(f'_record_to_spaceship_format: SRV target={value.target!r} -> {target!r}')
-                items.append({
-                    'type': 'SRV',
-                    'name': name,
-                    'priority': value.priority,
-                    'weight': value.weight,
-                    'port': value.port,
-                    'target': target,
-                    'ttl': ttl,
-                })
-        elif record._type == 'CAA':
-            for value in record.values:
-                items.append({
-                    'type': 'CAA',
-                    'name': name,
-                    'flat': value.flags,
-                    'tag': value.tag,
-                    'value': value.value,
-                    'ttl': ttl,
-                })
+        formatter = formatters.get(record._type)
+        if not formatter:
+            raise ValueError(f'Unsupported record type: {record._type}')
         
-        self.log.debug(f'_record_to_spaceship_format: record {name}/{record._type} -> {items}')
+        # CNAME only has a single value
+        if record._type == 'CNAME':
+            items.append(formatter(name, record.value, ttl))
+        else:
+            # All other types can have multiple values
+            for value in record.values:
+                items.append(formatter(name, value, ttl))
+        
+        self.log.debug(f'_record_to_spaceship_format: {name}/{record._type} -> {items}')
         return items
     
     def _apply(self, plan):
