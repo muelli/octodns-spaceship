@@ -24,20 +24,23 @@ class SpaceshipProvider(BaseProvider):
         api_secret: env/SPACESHIP_API_SECRET
         # Optional pagination settings
         page_size: 100
+        # Optional force flag for API operations (default: False)
+        force: false
     """
     
     SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = False
     SUPPORTS = set(('A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'CAA'))
     
-    def __init__(self, id, api_key, api_secret, page_size=100, *args, **kwargs):
+    def __init__(self, id, api_key, api_secret, page_size=100, force=False, *args, **kwargs):
         self.log = logging.getLogger(f'SpaceshipProvider[{id}]')
-        self.log.debug('__init__: id=%s, page_size=%d', id, page_size)
+        self.log.debug('__init__: id=%s, page_size=%d, force=%s', id, page_size, force)
         super().__init__(id, *args, **kwargs)
         
         self.api_key = api_key
         self.api_secret = api_secret
         self.page_size = page_size
+        self.force = force
         self.base_url = "https://spaceship.dev/api/v1/dns/records"
     
     def _get_headers(self):
@@ -467,11 +470,11 @@ class SpaceshipProvider(BaseProvider):
         url = f"{self.base_url}/{domain}"
         
         payload = {
-            "force": False,
+            "force": self.force,
             "items": items,
         }
         
-        self.log.info(f'_create_records: creating {len(items)} records for {domain}')
+        self.log.info(f'_create_records: creating {len(items)} records for {domain} (force={self.force})')
         self.log.debug(f'_create_records: payload={payload}')
         
         response = requests.put(url, json=payload, headers=self._get_headers())
@@ -486,7 +489,7 @@ class SpaceshipProvider(BaseProvider):
                 self.log.info(f'_create_records: attempting individual creates to isolate errors')
                 for item in items:
                     try:
-                        test_payload = {"force": False, "items": [item]}
+                        test_payload = {"force": self.force, "items": [item]}
                         test_response = requests.put(url, json=test_payload, headers=self._get_headers())
                         test_response.raise_for_status()
                         self.log.debug(f'_create_records: item OK: {item}')
