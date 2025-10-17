@@ -116,58 +116,102 @@ class SpaceshipProvider(BaseProvider):
         self.log.info(f'_fetch_records: fetched {len(all_records)} records for {domain}')
         return all_records
     
+    def _normalize_fqdn_from_spaceship(self, value):
+        """Add trailing dot to FQDN if not present (for reading from Spaceship)"""
+        if value and not value.endswith('.'):
+            return value + '.'
+        return value
+    
+    def _normalize_fqdn_to_spaceship(self, value):
+        """Remove trailing dot from FQDN (for writing to Spaceship)"""
+        if value:
+            return value.rstrip('.')
+        return value
+    
+    def _clamp_ttl(self, ttl):
+        """Clamp TTL to Spaceship's accepted range (60-3600)"""
+        if ttl < 60:
+            self.log.warning(f'TTL {ttl} is below minimum 60, clamping to 60')
+            return 60
+        elif ttl > 3600:
+            self.log.warning(f'TTL {ttl} is above maximum 3600, clamping to 3600')
+            return 3600
+        return ttl
+    
+    def _parse_a_record(self, record):
+        """Parse A record from Spaceship format to OctoDNS format"""
+        return record['address']
+    
+    def _parse_aaaa_record(self, record):
+        """Parse AAAA record from Spaceship format to OctoDNS format"""
+        return record['address']
+    
+    def _parse_cname_record(self, record):
+        """Parse CNAME record from Spaceship format to OctoDNS format"""
+        cname_value = self._normalize_fqdn_from_spaceship(record['cname'])
+        return {'type': 'CNAME', 'ttl': record.get('ttl', 3600), 'value': cname_value}
+    
+    def _parse_mx_record(self, record):
+        """Parse MX record from Spaceship format to OctoDNS format"""
+        exchange = self._normalize_fqdn_from_spaceship(record['exchange'])
+        return {
+            'preference': record.get('preference', 10),
+            'exchange': exchange
+        }
+    
+    def _parse_ns_record(self, record):
+        """Parse NS record from Spaceship format to OctoDNS format"""
+        nameserver = record.get('content', record.get('nameserver', ''))
+        return self._normalize_fqdn_from_spaceship(nameserver)
+    
+    def _parse_txt_record(self, record):
+        """Parse TXT record from Spaceship format to OctoDNS format"""
+        return record['value']
+    
+    def _parse_srv_record(self, record):
+        """Parse SRV record from Spaceship format to OctoDNS format"""
+        target = record.get('target', record.get('content', ''))
+        return {
+            'priority': record.get('priority', 0),
+            'weight': record.get('weight', 0),
+            'port': record.get('port', 0),
+            'target': self._normalize_fqdn_from_spaceship(target)
+        }
+    
+    def _parse_caa_record(self, record):
+        """Parse CAA record from Spaceship format to OctoDNS format"""
+        return {
+            'flags': record.get('flat', record.get('flags', 0)),
+            'tag': record.get('tag', 'issue'),
+            'value': record['value']
+        }
+    
     def _data_for_multiple(self, _type, records):
         """Convert multiple Spaceship records to OctoDNS data format"""
-        values = []
+        # Map record types to their parser functions
+        parsers = {
+            'A': self._parse_a_record,
+            'AAAA': self._parse_aaaa_record,
+            'CNAME': self._parse_cname_record,
+            'MX': self._parse_mx_record,
+            'NS': self._parse_ns_record,
+            'TXT': self._parse_txt_record,
+            'SRV': self._parse_srv_record,
+            'CAA': self._parse_caa_record,
+        }
         
-        for record in records:
-            if _type == 'A':
-                values.append(record['address'])
-            elif _type == 'AAAA':
-                values.append(record['address'])
-            elif _type == 'CNAME':
-                # CNAME should only have one record
-                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
-                cname_value = record['cname']
-                if not cname_value.endswith('.'):
-                    cname_value += '.'
-                return {'type': _type, 'ttl': record.get('ttl', 3600), 'value': cname_value}
-            elif _type == 'MX':
-                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
-                exchange = record['exchange']
-                if not exchange.endswith('.'):
-                    exchange += '.'
-                values.append({
-                    'preference': record.get('preference', 10),
-                    'exchange': exchange
-                })
-            elif _type == 'NS':
-                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
-                nameserver = record.get('content', record.get('nameserver', ''))
-                if not nameserver.endswith('.'):
-                    nameserver += '.'
-                values.append(nameserver)
-            elif _type == 'TXT':
-                values.append(record['value'])
-            elif _type == 'SRV':
-                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
-                target = record.get('target', record.get('content', ''))
-                if not target.endswith('.'):
-                    target += '.'
-                values.append({
-                    'priority': record.get('priority', 0),
-                    'weight': record.get('weight', 0),
-                    'port': record.get('port', 0),
-                    'target': target
-                })
-            elif _type == 'CAA':
-                values.append({
-                    'flags': record.get('flat', record.get('flags', 0)),
-                    'tag': record.get('tag', 'issue'),
-                    'value': record['value']
-                })
+        parser = parsers.get(_type)
+        if not parser:
+            raise ValueError(f'Unsupported record type: {_type}')
         
-        # Use the TTL from the first record (all should be the same for a record set)
+        # CNAME is special - it returns a complete record dict
+        if _type == 'CNAME':
+            return parser(records[0])
+        
+        # For all other types, collect values
+        values = [parser(record) for record in records]
+        
+        # Use the TTL from the first record
         ttl = records[0].get('ttl', 3600)
         
         return {
