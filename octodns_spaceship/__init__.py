@@ -220,6 +220,7 @@ class SpaceshipProvider(BaseProvider):
         """Convert OctoDNS record to Spaceship API format"""
         items = []
         name = record.name if record.name else '@'
+        ttl = record.ttl
         
         if record._type == 'A':
             for value in record.values:
@@ -227,6 +228,7 @@ class SpaceshipProvider(BaseProvider):
                     'type': 'A',
                     'name': name,
                     'address': value,
+                    'ttl': ttl,
                 })
         elif record._type == 'AAAA':
             for value in record.values:
@@ -234,6 +236,7 @@ class SpaceshipProvider(BaseProvider):
                     'type': 'AAAA',
                     'name': name,
                     'address': value,
+                    'ttl': ttl,
                 })
         elif record._type == 'CNAME':
             # Spaceship API does NOT accept trailing dots - strip them
@@ -243,6 +246,7 @@ class SpaceshipProvider(BaseProvider):
                 'type': 'CNAME',
                 'name': name,
                 'cname': cname_value,
+                'ttl': ttl,
             })
         elif record._type == 'MX':
             for value in record.values:
@@ -254,6 +258,7 @@ class SpaceshipProvider(BaseProvider):
                     'name': name,
                     'preference': value.preference,
                     'exchange': exchange,
+                    'ttl': ttl,
                 })
         elif record._type == 'TXT':
             for value in record.values:
@@ -261,6 +266,7 @@ class SpaceshipProvider(BaseProvider):
                     'type': 'TXT',
                     'name': name,
                     'value': value,
+                    'ttl': ttl,
                 })
         elif record._type == 'NS':
             for value in record.values:
@@ -271,6 +277,7 @@ class SpaceshipProvider(BaseProvider):
                     'type': 'NS',
                     'name': name,
                     'nameserver': nameserver,
+                    'ttl': ttl,
                 })
         elif record._type == 'SRV':
             for value in record.values:
@@ -284,6 +291,7 @@ class SpaceshipProvider(BaseProvider):
                     'weight': value.weight,
                     'port': value.port,
                     'target': target,
+                    'ttl': ttl,
                 })
         elif record._type == 'CAA':
             for value in record.values:
@@ -293,6 +301,7 @@ class SpaceshipProvider(BaseProvider):
                     'flat': value.flags,
                     'tag': value.tag,
                     'value': value.value,
+                    'ttl': ttl,
                 })
         
         self.log.debug(f'_record_to_spaceship_format: record {name}/{record._type} -> {items}')
