@@ -127,22 +127,38 @@ class SpaceshipProvider(BaseProvider):
                 values.append(record['address'])
             elif _type == 'CNAME':
                 # CNAME should only have one record
-                return {'type': _type, 'ttl': record.get('ttl', 3600), 'value': record['cname']}
+                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
+                cname_value = record['cname']
+                if not cname_value.endswith('.'):
+                    cname_value += '.'
+                return {'type': _type, 'ttl': record.get('ttl', 3600), 'value': cname_value}
             elif _type == 'MX':
+                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
+                exchange = record['exchange']
+                if not exchange.endswith('.'):
+                    exchange += '.'
                 values.append({
                     'preference': record.get('preference', 10),
-                    'exchange': record['exchange']
+                    'exchange': exchange
                 })
             elif _type == 'NS':
-                values.append(record.get('content', record.get('nameserver', '')))
+                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
+                nameserver = record.get('content', record.get('nameserver', ''))
+                if not nameserver.endswith('.'):
+                    nameserver += '.'
+                values.append(nameserver)
             elif _type == 'TXT':
                 values.append(record['value'])
             elif _type == 'SRV':
+                # Add trailing dot for OctoDNS FQDN format (Spaceship returns without dot)
+                target = record.get('target', record.get('content', ''))
+                if not target.endswith('.'):
+                    target += '.'
                 values.append({
                     'priority': record.get('priority', 0),
                     'weight': record.get('weight', 0),
                     'port': record.get('port', 0),
-                    'target': record.get('target', record.get('content', ''))
+                    'target': target
                 })
             elif _type == 'CAA':
                 values.append({
