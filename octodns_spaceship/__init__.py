@@ -169,7 +169,9 @@ class SpaceshipProvider(BaseProvider):
     
     def _parse_txt_record(self, record):
         """Parse TXT record from Spaceship format to OctoDNS format"""
-        return record['value']
+        # octoDNS wants semicolons escaped in TXT values exactly once, while
+        # Spaceship returns some of them bare and some already escaped
+        return record['value'].replace('\\;', ';').replace(';', '\\;')
     
     def _parse_srv_record(self, record):
         """Parse SRV record from Spaceship format to OctoDNS format"""
@@ -181,6 +183,14 @@ class SpaceshipProvider(BaseProvider):
             'target': self._normalize_fqdn_from_spaceship(target)
         }
     
+    def _srv_octodns_name(self, record):
+        """Build the octoDNS name (_service._proto[.host]) of a Spaceship SRV record"""
+        host = record.get('name', '@')
+        name = f"{record['service']}.{record['protocol']}"
+        if host not in ('', '@'):
+            name = f"{name}.{host}"
+        return name
+
     def _parse_caa_record(self, record):
         """Parse CAA record from Spaceship format to OctoDNS format"""
         return {
@@ -244,6 +254,9 @@ class SpaceshipProvider(BaseProvider):
             if name == '' or name == domain:
                 name = '@'
             rtype = record['type']
+            if rtype == 'SRV' and record.get('service') and record.get('protocol'):
+                # Spaceship keeps service and protocol apart from the host
+                name = self._srv_octodns_name(record)
             grouped[(name, rtype)].append(record)
         
         # Convert to OctoDNS records
@@ -309,7 +322,7 @@ class SpaceshipProvider(BaseProvider):
         return {
             'type': 'TXT',
             'name': name,
-            'value': value,
+            'value': value.replace('\\;', ';'),
             'ttl': ttl,
         }
     
@@ -328,9 +341,12 @@ class SpaceshipProvider(BaseProvider):
         """Format SRV record for Spaceship API"""
         target = self._normalize_fqdn_to_spaceship(value.target)
         self.log.debug(f'SRV: {value.target!r} -> {target!r}')
+        service, protocol, *host = name.split('.')
         return {
             'type': 'SRV',
-            'name': name,
+            'service': service,
+            'protocol': protocol,
+            'name': '.'.join(host) or '@',
             'priority': value.priority,
             'weight': value.weight,
             'port': value.port,
