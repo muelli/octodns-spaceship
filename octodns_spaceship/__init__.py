@@ -30,7 +30,7 @@ class SpaceshipProvider(BaseProvider):
     
     SUPPORTS_GEO = False
     SUPPORTS_DYNAMIC = False
-    SUPPORTS = set(('A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'CAA'))
+    SUPPORTS = set(('A', 'AAAA', 'ALIAS', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'CAA'))
     
     def __init__(self, id, api_key, api_secret, page_size=100, force=False, *args, **kwargs):
         self.log = logging.getLogger(f'SpaceshipProvider[{id}]')
@@ -154,6 +154,11 @@ class SpaceshipProvider(BaseProvider):
         cname_value = self._normalize_fqdn_from_spaceship(record['cname'])
         return {'type': 'CNAME', 'ttl': record.get('ttl', 3600), 'value': cname_value}
     
+    def _parse_alias_record(self, record):
+        """Parse ALIAS record from Spaceship format to OctoDNS format"""
+        alias_value = self._normalize_fqdn_from_spaceship(record['aliasName'])
+        return {'type': 'ALIAS', 'ttl': record.get('ttl', 3600), 'value': alias_value}
+
     def _parse_mx_record(self, record):
         """Parse MX record from Spaceship format to OctoDNS format"""
         exchange = self._normalize_fqdn_from_spaceship(record['exchange'])
@@ -206,6 +211,7 @@ class SpaceshipProvider(BaseProvider):
             'A': self._parse_a_record,
             'AAAA': self._parse_aaaa_record,
             'CNAME': self._parse_cname_record,
+            'ALIAS': self._parse_alias_record,
             'MX': self._parse_mx_record,
             'NS': self._parse_ns_record,
             'TXT': self._parse_txt_record,
@@ -217,8 +223,8 @@ class SpaceshipProvider(BaseProvider):
         if not parser:
             raise ValueError(f'Unsupported record type: {_type}')
         
-        # CNAME is special - it returns a complete record dict
-        if _type == 'CNAME':
+        # CNAME and ALIAS are special - they return a complete record dict
+        if _type in ('CNAME', 'ALIAS'):
             return parser(records[0])
         
         # For all other types, collect values
@@ -305,6 +311,17 @@ class SpaceshipProvider(BaseProvider):
             'ttl': ttl,
         }
     
+    def _format_alias_record(self, name, value, ttl):
+        """Format ALIAS record for Spaceship API"""
+        alias_name = self._normalize_fqdn_to_spaceship(value)
+        self.log.debug(f'ALIAS: {value!r} -> {alias_name!r}')
+        return {
+            'type': 'ALIAS',
+            'name': name,
+            'aliasName': alias_name,
+            'ttl': ttl,
+        }
+
     def _format_mx_record(self, name, value, ttl):
         """Format MX record for Spaceship API"""
         exchange = self._normalize_fqdn_to_spaceship(value.exchange)
@@ -376,6 +393,7 @@ class SpaceshipProvider(BaseProvider):
             'A': self._format_a_record,
             'AAAA': self._format_aaaa_record,
             'CNAME': self._format_cname_record,
+            'ALIAS': self._format_alias_record,
             'MX': self._format_mx_record,
             'TXT': self._format_txt_record,
             'NS': self._format_ns_record,
@@ -387,8 +405,8 @@ class SpaceshipProvider(BaseProvider):
         if not formatter:
             raise ValueError(f'Unsupported record type: {record._type}')
         
-        # CNAME only has a single value
-        if record._type == 'CNAME':
+        # CNAME and ALIAS only have a single value
+        if record._type in ('CNAME', 'ALIAS'):
             items.append(formatter(name, record.value, ttl))
         else:
             # All other types can have multiple values
