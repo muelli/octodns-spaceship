@@ -382,11 +382,16 @@ class SpaceshipProvider(BaseProvider):
             'ttl': ttl,
         }
     
-    def _record_to_spaceship_format(self, record):
-        """Convert OctoDNS record to Spaceship API format"""
+    def _record_to_spaceship_format(self, record, clamp=True):
+        """Convert OctoDNS record to Spaceship API format
+
+        clamp=False keeps the TTL as it is. Use that for a record that exists
+        already (the body of a delete has to match what Spaceship has, and
+        Spaceship may hold a TTL outside the range it accepts for new records).
+        """
         items = []
         name = record.name if record.name else '@'
-        ttl = self._clamp_ttl(record.ttl)
+        ttl = self._clamp_ttl(record.ttl) if clamp else record.ttl
         
         # Map record types to their formatter functions
         formatters = {
@@ -437,14 +442,14 @@ class SpaceshipProvider(BaseProvider):
             if has_existing and has_new:
                 # Update: delete old, create new
                 self.log.debug('_apply: update %s', change)
-                existing_items = self._record_to_spaceship_format(change.existing)
+                existing_items = self._record_to_spaceship_format(change.existing, clamp=False)
                 new_items = self._record_to_spaceship_format(change.new)
                 to_delete.extend(existing_items)
                 to_create.extend(new_items)
             elif has_existing:
                 # Delete
                 self.log.debug('_apply: delete %s', change)
-                items = self._record_to_spaceship_format(change.existing)
+                items = self._record_to_spaceship_format(change.existing, clamp=False)
                 to_delete.extend(items)
             elif has_new:
                 # Create
@@ -458,12 +463,60 @@ class SpaceshipProvider(BaseProvider):
         if to_delete:
             self._delete_records(domain, to_delete)
         
-        # Apply creations
+        # Apply creations. A delete that does not match what Spaceship holds
+        # can succeed without removing anything, so look again before creating.
+        if to_create:
+            to_create = self._prepare_creates(domain, to_create)
         if to_create:
             self._create_records(domain, to_create)
-        
+
         self.log.info('_apply: zone=%s, complete', domain)
-    
+
+    # A CNAME or ALIAS is one record per name; Spaceship refuses a second one
+    # ("CNAME with host ... already exists") instead of replacing it.
+    SINGLE_VALUE_TYPES = ('CNAME', 'ALIAS')
+
+    def _prepare_creates(self, domain, items):
+        """Return the items that still have to be created.
+
+        For CNAME and ALIAS items the live zone is read again:
+        - an identical record that is already there is left alone;
+        - a different record of the same name and type (left behind by a delete
+          that did not match) is deleted, using the body Spaceship returned,
+          so the create does not collide with it.
+        """
+        wanted = [i for i in items if i['type'] in self.SINGLE_VALUE_TYPES]
+        if not wanted:
+            return items
+
+        live = defaultdict(list)
+        for record in self._fetch_records(domain):
+            if record.get('type') in self.SINGLE_VALUE_TYPES:
+                name = record.get('name', '@')
+                if name == '' or name == domain:
+                    name = '@'
+                live[(record['type'], name)].append(record)
+
+        stale = []
+        todo = []
+        for item in items:
+            key = (item['type'], item['name'])
+            if item['type'] not in self.SINGLE_VALUE_TYPES or key not in live:
+                todo.append(item)
+                continue
+            exact = [r for r in live[key] if all(r.get(k) == v for k, v in item.items())]
+            if exact and len(live[key]) == 1:
+                self.log.info('_prepare_creates: %s %s is already in place, not creating it again', item['type'], item['name'])
+                continue
+            self.log.warning('_prepare_creates: %s %s exists with %s; removing it before creating %s',
+                             item['type'], item['name'], live[key], item)
+            stale.extend(live[key])
+            todo.append(item)
+
+        if stale:
+            self._delete_records(domain, stale)
+        return todo
+
     def _delete_records(self, domain, items):
         """Delete records from Spaceship DNS"""
         url = f"{self.base_url}/{domain}"
