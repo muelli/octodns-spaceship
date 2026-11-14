@@ -16,7 +16,7 @@ from octodns.provider.plan import Plan
 from octodns.record import Delete, Record, Update
 from octodns.zone import Zone
 
-import spaceship_octodns as mod
+import octodns_spaceship as mod
 
 
 class FakeApi:
