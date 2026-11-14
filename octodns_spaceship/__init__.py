@@ -433,23 +433,24 @@ class SpaceshipProvider(BaseProvider):
         # Group changes by type (create, update, delete)
         to_create = []
         to_delete = []
-        
+        live_cache = {}
+
         for change in changes:
             # Check what type of change this is
             has_existing = hasattr(change, 'existing') and change.existing is not None
             has_new = hasattr(change, 'new') and change.new is not None
-            
+
             if has_existing and has_new:
                 # Update: delete old, create new
                 self.log.debug('_apply: update %s', change)
-                existing_items = self._record_to_spaceship_format(change.existing, clamp=False)
+                existing_items = self._items_to_delete(domain, change.existing, live_cache)
                 new_items = self._record_to_spaceship_format(change.new)
                 to_delete.extend(existing_items)
                 to_create.extend(new_items)
             elif has_existing:
                 # Delete
                 self.log.debug('_apply: delete %s', change)
-                items = self._record_to_spaceship_format(change.existing, clamp=False)
+                items = self._items_to_delete(domain, change.existing, live_cache)
                 to_delete.extend(items)
             elif has_new:
                 # Create
@@ -471,6 +472,35 @@ class SpaceshipProvider(BaseProvider):
             self._create_records(domain, to_create)
 
         self.log.info('_apply: zone=%s, complete', domain)
+
+    def _items_to_delete(self, domain, record, cache):
+        """Bodies to send to DELETE for an existing octoDNS record.
+
+        Spaceship matches a delete against the stored record exactly and
+        answers 200 when nothing matches, so a body rebuilt from octoDNS' view
+        (a CNAME value without its trailing dot, a TTL, a duplicate value) can
+        silently delete nothing. Use the records Spaceship itself returned for
+        that name and type, every one of them: octoDNS' record is the whole set.
+        """
+        if 'index' not in cache:
+            index = defaultdict(list)
+            for raw in self._fetch_records(domain):
+                name = raw.get('name', '@')
+                if name == '' or name == domain:
+                    name = '@'
+                if raw.get('type') == 'SRV' and raw.get('service') and raw.get('protocol'):
+                    name = self._srv_octodns_name(raw)
+                index[(raw.get('type'), '' if name == '@' else name)].append(raw)
+            cache['index'] = index
+
+        found = [dict(raw) for raw in cache['index'].get((record._type, record.name), [])]
+        if found:
+            return found
+
+        items = self._record_to_spaceship_format(record, clamp=False)
+        self.log.warning('_items_to_delete: Spaceship holds no %s record named %r; '
+                         'falling back to the rebuilt body %s', record._type, record.name, items)
+        return items
 
     # A CNAME or ALIAS is one record per name; Spaceship refuses a second one
     # ("CNAME with host ... already exists") instead of replacing it.
